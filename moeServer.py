@@ -3,33 +3,32 @@ from twisted.internet import reactor,protocol
 import struct,sys
 
 
-class remoteFacory(protocol.ClientFactory):
+class remoteFactory(protocol.ClientFactory):
     def __init__(self,socks5):
         self.protocol = remoteProtocol
         self.socks5 = socks5
+        print 'init'
 
     def clientConnectionFailed(self,connector,reason):
         print 'failed:',reason.getErrorMessage()
+        self.socks5.reply(1)
         self.socks5.transport.loseConnection()
 
     def clientConnectionLost(self,connector,reason):
-        print 'lost:',reson.getErrorMessage()
+        print 'lost:',reason.getErrorMessage()
+        self.socks5.reply(4)
         self.socks5.transport.lostConnection()
 
 class remoteProtocol(protocol.Protocol):
     def connectionMade(self):
         self.socks5 = self.factory.socks5
+        self.socks5.reply(0)
         self.socks5.remote = self.transport
         self.socks5.state = 'connecting'
     # send local the remote data
     def dataReceived(self,data):
+        print 'remove data'
         self.socks5.transport.write(data)
-
-    # if remote host lost.Reset the state
-    # and close the connection
-    def connectionLost(self):
-        self.socks5.state = 'listen'
-        self.socks5.transport.lostConnection()
 
 class socks5Protocol(protocol.Protocol):
     def connectionMade(self):
@@ -54,7 +53,7 @@ class socks5Protocol(protocol.Protocol):
         methods = data[2:2+nmethods]
         for method in methods:
             ## no auth,no need account and pass
-            if ord(meth) == 0:
+            if ord(method) == 0:
                 ## 
                 resp = struct.pack('!BB',5,0)
                 self.transport.write(resp)
@@ -103,6 +102,7 @@ class socks5Protocol(protocol.Protocol):
             port = struct.unpack('!H',data[:2])
             port = port[0]
             data = data[2:]
+            print host,port
             return self.connect(host,port) 
         ## bind
         elif cmd == 2:
@@ -113,16 +113,31 @@ class socks5Protocol(protocol.Protocol):
         else:
             self.transport.loseConnection()
 
+    def reply(self,rep):
+        try:
+            myname = self.transport.getHost().host
+        except:
+            self.transport.loseConnection()
+            return
+        ip = [int(i) for i in myname.split('.')]
+        resp = struct.pack('!BBBB',5,rep,0,1)
+        resp += struct.pack('!BBBB',ip[0],ip[1],ip[2],ip[3])
+        resp += struct.pack('!H',self.transport.getHost().port)
+        self.transport.write(resp)
+
     def connect(self,host,port):
-        facotry = remote_facotry(self)
+        factory = remoteFactory(self)
         reactor.connectTCP(host,port,factory)
+
+    def connecting(self,data):
+        self.remote.write(data)
 
 
 def main():
-   factory = protocol.ServerFactory() 
-   factory.protocol = socks5Protocol
-   reactor.listenTCP(11235,factory)
-   reactor.run()
+    factory = protocol.ServerFactory() 
+    factory.protocol = socks5Protocol
+    reactor.listenTCP(11234,factory)
+    reactor.run()
 
 if __name__=='__main__':
     main()
