@@ -1,5 +1,6 @@
+#coding:utf-8
 from twisted.internet import reactor,protocol
-import struct
+import struct,sys
 
 
 class remoteFacory(protocol.ClientFactory):
@@ -39,36 +40,89 @@ class socks5Protocol(protocol.Protocol):
         method(data)
 
     def listen(self,data):
-        if data:
-            self.transport.write('res')
-            self.state = 'accept'
-        self.transport.lostConnection()
+        ver,nmethods = struct.unpack('!BB',data[:2])
+        if not ver == 5:
+            print 'Please use Socket V5?'
+            self.tansport.loseConection()
+            sys.exit(1)
 
-    def accept(self,data):
-        (checkPoint,lenth) = struct.unpack('!BB',data[:2])
-        # To make sure all things are right
-        # maybe I think too much....
-        if checkPoint != 0:
+        if nmethods<1:
+            print "What's this!?"
+            self.tansport.loseConnection()
+            sys.exit(1)
+
+        methods = data[2:2+nmethods]
+        for method in methods:
+            ## no auth,no need account and pass
+            if ord(meth) == 0:
+                ## 
+                resp = struct.pack('!BB',5,0)
+                self.transport.write(resp)
+                self.state = 'wait_connect'
+                return # continue?
+            elif ord(meth) == 2:
+                resp = struct.pack('!BB',5,2)
+                self.transport.write(resp)
+                self.state = 'wait_auth_connect'
+                return
+            elif ord(meth)==255:
+                self.transport.loseConnection()
+                return
+            else:
+                ## maybe use 01,02,03,80....
+                ## but it is not necessary
+                ## so cut off the connection
+                self.transport.loseConnection()
+
+    def wait_connect(self,data):
+        ver,cmd,rsv,atyp = struct.unpack('!BBBB',data[:4])
+        ## not use the socket v5
+        ## or used the rsv...(?)
+        if ver != 5 or rsv!=0:
+            print "Please use socket v5"
+            self.transport.loseConnection()
+            return
+        data = data[4:]
+        ## connect
+        if cmd == 1:
+            if atyp == 1: #IP V4
+                b1,b2,b3,b4 = struct.unpack('!BBBB',data[:4])
+                host = '%i.%i.%i.%i' % (b1,b2,b3,b4)
+                data = data[4:]
+            elif atyp == 3: # domain name
+                # the first octet is the number of lenth
+                lenth = struct.unpack('!B',data[0])
+                lenth = lenth[0]
+                host = data[1:1+lenth]
+                data = data[1+lenth:]
+            elif atyp == 4:#ip v6
+                pass
+            else:
+                self.transport.loseConnection()
+                return
+            port = struct.unpack('!H',data[:2])
+            port = port[0]
+            data = data[2:]
+            return self.connect(host,port) 
+        ## bind
+        elif cmd == 2:
+            pass
+        ## udp associate
+        elif cmd == 3:
+            pass
+        else:
             self.transport.loseConnection()
 
-        ## pickle the data
-        destFormat = '!{0}sL'.format(lenth)
-        ## 2:2+lenth is host and 2+lenth:6+lenth is port
-        (host,port) = struct.unpack(hostFormat,data[2:6+lenth])
-        return self.remote_connect(host,port)
-
-    def remote_connect(self,host,port):
-        factory = remoteFactory(self)
+    def connect(self,host,port):
+        facotry = remote_facotry(self)
         reactor.connectTCP(host,port,factory)
 
-    def connecting(self,data):
-        self.remote.write(data)
-
-
-    
 
 def main():
    factory = protocol.ServerFactory() 
    factory.protocol = socks5Protocol
-   reactor.listen(11235,factory)
+   reactor.listenTCP(11235,factory)
    reactor.run()
+
+if __name__=='__main__':
+    main()
